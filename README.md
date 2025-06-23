@@ -13,7 +13,7 @@ A beautiful and elegant step counter application built with Flutter that tracks 
 
 ## Screenshots
 
-_Add your app screenshots here_
+![Pacelt App](images/app.png)
 
 ## Installation
 
