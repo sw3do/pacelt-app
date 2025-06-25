@@ -119,11 +119,30 @@ The app supports multiple languages with complete localization:
 
 ```
 lib/
-├── main.dart                 # App entry point
+├── main.dart                 # App entry point with localization setup
 ├── screens/                  # UI screens
 ├── models/                   # Data models
 ├── services/                 # Business logic and APIs
 └── widgets/                  # Reusable UI components
+
+assets/
+└── translations/
+    ├── en.json               # English language translations
+    └── tr.json               # Turkish language translations
+
+images/
+└── app.png                   # App screenshot for documentation
+
+android/
+├── app/
+│   ├── build.gradle.kts      # Android build configuration
+│   └── src/main/
+│       └── AndroidManifest.xml  # Android permissions and services
+
+ios/
+└── Runner/
+    ├── Info.plist            # iOS app configuration
+    └── ...                   # iOS specific files
 ```
 
 ## Contributing
