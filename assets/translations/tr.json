@@ -35,8 +35,14 @@
   "refresh": "Yenile",
   "step_counter_reset": "Adım sayacı sıfırlandı",
   "step_counter_refreshed": "Adım sayacı yenilendi",
+  "new_day_started": "Yeni gün başladı! Dünkü adımlar kaydedildi.",
   "initializing_step_counter": "Adım sayacı başlatılıyor...",
   "language": "Dil",
   "english": "English",
-  "turkish": "Türkçe"
+  "turkish": "Türkçe",
+  "german": "Deutsch",
+  "theme": "Tema",
+  "light_theme": "Aydınlık Tema",
+  "dark_theme": "Karanlık Tema",
+  "system_theme": "Sistem Teması"
 } 

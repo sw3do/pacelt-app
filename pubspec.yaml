@@ -39,6 +39,7 @@ dependencies:
   shared_preferences: ^2.2.2
   workmanager: ^0.6.0
   easy_localization: ^3.0.7
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:

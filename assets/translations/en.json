@@ -35,8 +35,14 @@
   "refresh": "Refresh",
   "step_counter_reset": "Step counter has been reset",
   "step_counter_refreshed": "Step counter refreshed",
+  "new_day_started": "New day started! Yesterday's steps saved.",
   "initializing_step_counter": "Initializing step counter...",
   "language": "Language",
   "english": "English",
-  "turkish": "Türkçe"
+  "turkish": "Türkçe",
+  "german": "Deutsch",
+  "theme": "Theme",
+  "light_theme": "Light Theme",
+  "dark_theme": "Dark Theme",
+  "system_theme": "System Theme"
 } 

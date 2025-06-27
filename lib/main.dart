@@ -4,34 +4,163 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:provider/provider.dart';
 import 'dart:developer' as developer;
 import 'dart:async';
+
+enum AppThemeMode { light, dark, system }
+
+class ThemeManager extends ChangeNotifier {
+  AppThemeMode _themeMode = AppThemeMode.system;
+  
+  AppThemeMode get themeMode => _themeMode;
+  
+  ThemeManager() {
+    _loadTheme();
+  }
+  
+  Future<void> _loadTheme() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? themeModeString = prefs.getString('theme_mode');
+    if (themeModeString != null) {
+      _themeMode = AppThemeMode.values.firstWhere(
+        (mode) => mode.toString() == themeModeString,
+        orElse: () => AppThemeMode.system,
+      );
+      notifyListeners();
+    }
+  }
+  
+  Future<void> setThemeMode(AppThemeMode mode) async {
+    _themeMode = mode;
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('theme_mode', mode.toString());
+    notifyListeners();
+  }
+  
+  ThemeData get lightTheme => ThemeData(
+    useMaterial3: true,
+    colorScheme: const ColorScheme.light(
+      primary: Color(0xFF4F46E5),
+      onPrimary: Colors.white,
+      secondary: Color(0xFF10B981),
+      onSecondary: Colors.white,
+      surface: Colors.white,
+      onSurface: Color(0xFF1F2937),
+      error: Color(0xFFEF4444),
+    ),
+    scaffoldBackgroundColor: const Color(0xFFF9FAFB),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.white,
+      foregroundColor: Color(0xFF1F2937),
+      elevation: 0,
+      centerTitle: true,
+    ),
+    cardTheme: CardThemeData(
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: Colors.white,
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF4F46E5),
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 4,
+      ),
+    ),
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: Color(0xFF4F46E5),
+      foregroundColor: Colors.white,
+    ),
+  );
+  
+  ThemeData get darkTheme => ThemeData(
+    useMaterial3: true,
+    colorScheme: const ColorScheme.dark(
+      primary: Color(0xFF6366F1),
+      onPrimary: Colors.white,
+      secondary: Color(0xFF34D399),
+      onSecondary: Colors.black,
+      surface: Color(0xFF1F2937),
+      onSurface: Color(0xFFE5E7EB),
+
+      error: Color(0xFFF87171),
+    ),
+    scaffoldBackgroundColor: const Color(0xFF111827),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Color(0xFF1F2937),
+      foregroundColor: Color(0xFFE5E7EB),
+      elevation: 0,
+      centerTitle: true,
+    ),
+    cardTheme: CardThemeData(
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: const Color(0xFF1F2937),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF6366F1),
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 4,
+      ),
+    ),
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: Color(0xFF6366F1),
+      foregroundColor: Colors.white,
+    ),
+  );
+}
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    developer.log("Background task executed: $task");
+    developer.log("Background task executed: $task at ${DateTime.now()}");
     
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       int currentSteps = prefs.getInt('today_steps') ?? 0;
       int currentTime = DateTime.now().millisecondsSinceEpoch;
+      int lastSyncTime = prefs.getInt('last_sync_timestamp') ?? 0;
       
       String today = DateTime.now().toIso8601String().split('T')[0];
       String lastDay = prefs.getString('last_day') ?? '';
       
       if (today != lastDay) {
+        int previousDaySteps = currentSteps;
+        await prefs.setInt('previous_day_steps', previousDaySteps);
         await prefs.setInt('today_steps', 0);
         await prefs.setString('last_day', today);
-        await prefs.setInt('daily_reset_steps', currentSteps);
-        developer.log("Daily reset performed");
+        await prefs.setInt('daily_reset_timestamp', currentTime);
+        developer.log("Background daily reset performed: Previous day steps: $previousDaySteps");
+        currentSteps = 0;
+      }
+      
+      int timeSinceLastSync = currentTime - lastSyncTime;
+      if (timeSinceLastSync < 0) {
+        developer.log("Time inconsistency detected - system clock might have changed");
       }
       
       await prefs.setInt('last_background_steps', currentSteps);
       await prefs.setInt('last_sync_timestamp', currentTime);
-      developer.log("Steps synced in background: $currentSteps");
+      await prefs.setInt('background_task_count', (prefs.getInt('background_task_count') ?? 0) + 1);
+      
+      developer.log("Background sync completed: Steps=$currentSteps, TimeSinceLastSync=${timeSinceLastSync}ms");
     } catch (e) {
       developer.log("Error in background task: $e");
+      
+      try {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('background_error_count', (prefs.getInt('background_error_count') ?? 0) + 1);
+        await prefs.setString('last_background_error', e.toString());
+        await prefs.setInt('last_background_error_time', DateTime.now().millisecondsSinceEpoch);
+      } catch (errorSavingError) {
+        developer.log("Failed to save background error: $errorSavingError");
+      }
     }
     
     return Future.value(true);
@@ -62,7 +191,7 @@ void main() async {
   
   runApp(
     EasyLocalization(
-      supportedLocales: const [Locale('en'), Locale('tr')],
+      supportedLocales: const [Locale('en'), Locale('tr'), Locale('de')],
       path: 'assets/translations',
       fallbackLocale: const Locale('en'),
       child: const StepCounterApp(),
@@ -75,19 +204,27 @@ class StepCounterApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'app_title'.tr(),
-      localizationsDelegates: context.localizationDelegates,
-      supportedLocales: context.supportedLocales,
-      locale: context.locale,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        fontFamily: 'System',
-        useMaterial3: true,
+    return ChangeNotifierProvider(
+      create: (_) => ThemeManager(),
+      child: Consumer<ThemeManager>(
+        builder: (context, themeManager, _) {
+          return MaterialApp(
+            title: 'app_title'.tr(),
+            localizationsDelegates: context.localizationDelegates,
+            supportedLocales: context.supportedLocales,
+            locale: context.locale,
+            theme: themeManager.lightTheme,
+            darkTheme: themeManager.darkTheme,
+            themeMode: themeManager.themeMode == AppThemeMode.system
+                ? ThemeMode.system
+                : themeManager.themeMode == AppThemeMode.dark
+                    ? ThemeMode.dark
+                    : ThemeMode.light,
+            home: const StepCounterHome(),
+            debugShowCheckedModeBanner: false,
+          );
+        },
       ),
-      home: const StepCounterHome(),
-      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -106,7 +243,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
   String _status = '?';
   int _dailyGoal = 10000;
   int _todaySteps = 0;
-  int _sessionSteps = 0;
+
   int _baseStepCount = 0;
   bool _isWalking = false;
   bool _backgroundServiceRunning = false;
@@ -166,17 +303,40 @@ class _StepCounterHomeState extends State<StepCounterHome>
   }
 
   Future<void> _checkDailyReset() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String today = DateTime.now().toIso8601String().split('T')[0];
-    String lastDay = prefs.getString('last_day') ?? '';
-    
-    if (today != lastDay) {
-      await prefs.setInt('today_steps', 0);
-      await prefs.setString('last_day', today);
-      await prefs.setInt('daily_reset_steps', _sessionSteps);
-      _todaySteps = 0;
-      _sessionSteps = 0;
-      developer.log("Daily reset performed");
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String today = DateTime.now().toIso8601String().split('T')[0];
+      String lastDay = prefs.getString('last_day') ?? '';
+      
+      if (today != lastDay) {
+        int previousDaySteps = _todaySteps;
+        
+        await prefs.setInt('previous_day_steps', previousDaySteps);
+        await prefs.setInt('today_steps', 0);
+        await prefs.setString('last_day', today);
+        await prefs.setInt('daily_reset_timestamp', DateTime.now().millisecondsSinceEpoch);
+        
+        if (mounted) {
+          setState(() {
+            _todaySteps = 0;
+          });
+          _updateProgressAnimation();
+        }
+        
+        developer.log("Daily reset performed: Previous day steps: $previousDaySteps, New day: $today");
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('new_day_started'.tr()),
+              duration: const Duration(seconds: 3),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      developer.log("Error during daily reset: $e");
     }
   }
 
@@ -215,6 +375,8 @@ class _StepCounterHomeState extends State<StepCounterHome>
 
   Future<void> _startBackgroundService() async {
     try {
+      await Workmanager().cancelAll();
+      
       await Workmanager().registerPeriodicTask(
         "step-counter-periodic",
         "periodic-step-task",
@@ -226,7 +388,12 @@ class _StepCounterHomeState extends State<StepCounterHome>
           requiresDeviceIdle: false,
           requiresStorageNotLow: false,
         ),
+        existingWorkPolicy: ExistingWorkPolicy.replace,
       );
+      
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('background_service_enabled', true);
+      await prefs.setInt('background_service_start_time', DateTime.now().millisecondsSinceEpoch);
       
       setState(() {
         _backgroundServiceRunning = true;
@@ -237,6 +404,9 @@ class _StepCounterHomeState extends State<StepCounterHome>
       setState(() {
         _backgroundServiceRunning = false;
       });
+      
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('background_service_enabled', false);
     }
   }
 
@@ -375,7 +545,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -384,22 +554,22 @@ class _StepCounterHomeState extends State<StepCounterHome>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.language_rounded,
-                  color: Color(0xFF4F46E5),
+                  color: Theme.of(context).colorScheme.primary,
                   size: 20,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
                 'language'.tr(),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF2D3748),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],
@@ -411,7 +581,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                 leading: const Text('🇺🇸', style: TextStyle(fontSize: 24)),
                 title: Text('english'.tr()),
                 trailing: context.locale.languageCode == 'en' 
-                  ? const Icon(Icons.check, color: Color(0xFF4F46E5))
+                  ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
                   : null,
                 onTap: () {
                   context.setLocale(const Locale('en'));
@@ -422,10 +592,21 @@ class _StepCounterHomeState extends State<StepCounterHome>
                 leading: const Text('🇹🇷', style: TextStyle(fontSize: 24)),
                 title: Text('turkish'.tr()),
                 trailing: context.locale.languageCode == 'tr' 
-                  ? const Icon(Icons.check, color: Color(0xFF4F46E5))
+                  ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
                   : null,
                 onTap: () {
                   context.setLocale(const Locale('tr'));
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+              ListTile(
+                leading: const Text('🇩🇪', style: TextStyle(fontSize: 24)),
+                title: Text('german'.tr()),
+                trailing: context.locale.languageCode == 'de' 
+                  ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+                  : null,
+                onTap: () {
+                  context.setLocale(const Locale('de'));
                   Navigator.of(dialogContext).pop();
                 },
               ),
@@ -436,33 +617,134 @@ class _StepCounterHomeState extends State<StepCounterHome>
     );
   }
 
+  void _showThemeDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return Consumer<ThemeManager>(
+          builder: (context, themeManager, _) {
+            return AlertDialog(
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.palette_rounded,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'theme'.tr(),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.light_mode_rounded),
+                    title: Text('light_theme'.tr()),
+                    trailing: themeManager.themeMode == AppThemeMode.light
+                        ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+                        : null,
+                    onTap: () {
+                      themeManager.setThemeMode(AppThemeMode.light);
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.dark_mode_rounded),
+                    title: Text('dark_theme'.tr()),
+                    trailing: themeManager.themeMode == AppThemeMode.dark
+                        ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+                        : null,
+                    onTap: () {
+                      themeManager.setThemeMode(AppThemeMode.dark);
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings_system_daydream_rounded),
+                    title: Text('system_theme'.tr()),
+                    trailing: themeManager.themeMode == AppThemeMode.system
+                        ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+                        : null,
+                    onTap: () {
+                      themeManager.setThemeMode(AppThemeMode.system);
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void onStepCount(StepCount event) {
     if (!mounted || !_isInitialized) return;
     
     try {
+      int totalSteps = event.steps;
+      
       if (_baseStepCount == 0) {
-        _baseStepCount = event.steps;
+        _baseStepCount = totalSteps;
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setInt('base_step_count', _baseStepCount);
+        });
+        developer.log("Base step count initialized: $_baseStepCount");
+        return;
+      }
+      
+      int newSteps = totalSteps - _baseStepCount;
+      
+      if (newSteps < 0) {
+        developer.log("Negative step count detected - device might have restarted");
+        _baseStepCount = totalSteps;
+        newSteps = 0;
         SharedPreferences.getInstance().then((prefs) {
           prefs.setInt('base_step_count', _baseStepCount);
         });
       }
       
-      int newSteps = event.steps - _baseStepCount;
-      
-      if (newSteps >= 0 && newSteps != _todaySteps) {
-        setState(() {
-          _todaySteps = newSteps;
-        });
-        _updateProgressAnimation();
+      if (newSteps >= 0) {
+        int stepDifference = newSteps - _todaySteps;
         
-        if (_todaySteps % 100 == 0) {
-          _saveSteps();
+        if (stepDifference > 0 && stepDifference < 1000) {
+          setState(() {
+            _todaySteps = newSteps;
+          });
+          _updateProgressAnimation();
+          
+          if (_todaySteps % 50 == 0) {
+            _saveSteps();
+          }
+          
+          developer.log("Step count updated: Total=$totalSteps, Today=$_todaySteps, Base=$_baseStepCount, Diff=$stepDifference");
+        } else if (stepDifference >= 1000) {
+          developer.log("Large step increase detected ($stepDifference) - possible sensor error");
         }
       }
-      
-      developer.log("Step count updated: Total=${event.steps}, Today=$_todaySteps, Base=$_baseStepCount");
     } catch (e) {
       developer.log("Error processing step count: $e");
+      _reinitializeSensors();
     }
   }
 
@@ -500,9 +782,53 @@ class _StepCounterHomeState extends State<StepCounterHome>
         
       });
     }
+    _reinitializeSensors();
+  }
+
+  Future<void> _reinitializeSensors() async {
+    developer.log("Reinitializing sensors due to error");
+    
+    try {
+      await _stepCountSubscription?.cancel();
+      await _statusSubscription?.cancel();
+      
+      await Future.delayed(const Duration(seconds: 2));
+      
+      if (mounted) {
+        _stepCountStream = Pedometer.stepCountStream;
+        _stepCountSubscription = _stepCountStream.listen(
+          onStepCount,
+          onError: onStepCountError,
+          onDone: () => developer.log("Step count stream closed"),
+          cancelOnError: false,
+        );
+
+        _pedestrianStatusStream = Pedometer.pedestrianStatusStream;
+        _statusSubscription = _pedestrianStatusStream.listen(
+          onPedestrianStatusChanged,
+          onError: onPedestrianStatusError,
+          onDone: () => developer.log("Pedestrian status stream closed"),
+          cancelOnError: false,
+        );
+        
+        developer.log("Sensors reinitialized successfully");
+      }
+    } catch (e) {
+      developer.log("Error reinitializing sensors: $e");
+    }
   }
 
   double get progressPercentage => (_todaySteps / _dailyGoal).clamp(0.0, 1.0);
+
+  int _calculateCalories(int steps) {
+    const double averageCaloriesPerStep = 0.045;
+    return (steps * averageCaloriesPerStep).round();
+  }
+
+  double _calculateDistance(int steps) {
+    const double averageStepLengthKm = 0.000762;
+    return steps * averageStepLengthKm;
+  }
 
   @override
   void dispose() {
@@ -520,18 +846,20 @@ class _StepCounterHomeState extends State<StepCounterHome>
   Widget build(BuildContext context) {
     if (!_isInitialized) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF8F9FA),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const CircularProgressIndicator(),
+              CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              ),
               const SizedBox(height: 16),
               Text(
                 'initializing_step_counter'.tr(),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
-                  color: Color(0xFF2D3748),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],
@@ -541,7 +869,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
@@ -583,7 +911,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                     'hello'.tr(),
                     style: TextStyle(
                       fontSize: 16,
-                      color: Colors.grey[600],
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -617,12 +945,12 @@ class _StepCounterHomeState extends State<StepCounterHome>
                 ],
               ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Pacelt',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF2D3748),
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ],
@@ -631,7 +959,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
           children: [
             Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
@@ -643,9 +971,9 @@ class _StepCounterHomeState extends State<StepCounterHome>
               ),
               child: IconButton(
                 onPressed: _showLanguageDialog,
-                icon: const Icon(
+                icon: Icon(
                   Icons.language_rounded,
-                  color: Color(0xFF4F46E5),
+                  color: Theme.of(context).colorScheme.primary,
                   size: 24,
                 ),
               ),
@@ -653,7 +981,29 @@ class _StepCounterHomeState extends State<StepCounterHome>
             const SizedBox(width: 8),
             Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                onPressed: _showThemeDialog,
+                icon: Icon(
+                  Icons.palette_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 24,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
@@ -665,9 +1015,9 @@ class _StepCounterHomeState extends State<StepCounterHome>
               ),
               child: IconButton(
                 onPressed: _showSettingsDialog,
-                icon: const Icon(
+                icon: Icon(
                   Icons.settings_rounded,
-                  color: Color(0xFF4F46E5),
+                  color: Theme.of(context).colorScheme.primary,
                   size: 24,
                 ),
               ),
@@ -831,7 +1181,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -855,16 +1205,16 @@ class _StepCounterHomeState extends State<StepCounterHome>
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: isCompleted ? Colors.green[600] : Colors.grey[600],
+                      color: isCompleted ? Colors.green[600] : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '$_dailyGoal ${'steps'.tr()}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF2D3748),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ],
@@ -893,7 +1243,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                 'progress'.tr(),
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey[600],
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
               ),
               Text(
@@ -901,7 +1251,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: isCompleted ? Colors.green[600] : const Color(0xFF4F46E5),
+                  color: isCompleted ? Colors.green[600] : Theme.of(context).colorScheme.primary,
                 ),
               ),
             ],
@@ -911,7 +1261,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
             width: double.infinity,
             height: 8,
             decoration: BoxDecoration(
-              color: Colors.grey[200],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(4),
             ),
             child: FractionallySizedBox(
@@ -922,7 +1272,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                   gradient: LinearGradient(
                     colors: isCompleted
                       ? [Colors.green[400]!, Colors.green[600]!]
-                      : [const Color(0xFF4F46E5), const Color(0xFF667EEA)],
+                      : [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primary.withValues(alpha: 0.7)],
                   ),
                   borderRadius: BorderRadius.circular(4),
                 ),
@@ -935,7 +1285,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
               '${_dailyGoal - _todaySteps} ${'steps_remaining'.tr()}',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -950,10 +1300,10 @@ class _StepCounterHomeState extends State<StepCounterHome>
       children: [
         Text(
           'statistics'.tr(),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF2D3748),
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 16),
@@ -967,14 +1317,14 @@ class _StepCounterHomeState extends State<StepCounterHome>
           children: [
             _buildStatCard(
               'calories'.tr(),
-              '${(_todaySteps * 0.04).toInt()}',
+              '${_calculateCalories(_todaySteps)}',
               'cal'.tr(),
               Icons.local_fire_department_rounded,
               Colors.orange,
             ),
             _buildStatCard(
               'distance'.tr(),
-              (_todaySteps * 0.0008).toStringAsFixed(1),
+              _calculateDistance(_todaySteps).toStringAsFixed(2),
               'km'.tr(),
               Icons.straighten_rounded,
               Colors.purple,
@@ -1003,7 +1353,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -1033,7 +1383,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
             title,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey[600],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1043,10 +1393,10 @@ class _StepCounterHomeState extends State<StepCounterHome>
             children: [
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF2D3748),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 2),
@@ -1056,7 +1406,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                   unit,
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1105,7 +1455,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -1114,22 +1464,22 @@ class _StepCounterHomeState extends State<StepCounterHome>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.flag_rounded,
-                  color: Color(0xFF4F46E5),
+                  color: Theme.of(context).colorScheme.primary,
                   size: 20,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
                 'daily_goal'.tr(),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF2D3748),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],
@@ -1140,20 +1490,20 @@ class _StepCounterHomeState extends State<StepCounterHome>
               TextField(
                 controller: goalController,
                 keyboardType: TextInputType.number,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
-                  color: Color(0xFF2D3748),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
                 decoration: InputDecoration(
                   labelText: 'target_steps_per_day'.tr(),
-                  labelStyle: TextStyle(color: Colors.grey[600]),
+                  labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
+                    borderSide: BorderSide(color: Theme.of(context).colorScheme.outline),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 2),
+                    borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1200,7 +1550,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange[400],
+                          backgroundColor: Theme.of(context).colorScheme.error,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1215,7 +1565,7 @@ class _StepCounterHomeState extends State<StepCounterHome>
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[400],
+                          backgroundColor: Theme.of(context).colorScheme.secondary,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1235,12 +1585,12 @@ class _StepCounterHomeState extends State<StepCounterHome>
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: Text(
                 'cancel'.tr(),
-                style: TextStyle(color: Colors.grey[600]),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
               ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4F46E5),
+                backgroundColor: Theme.of(context).colorScheme.primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
